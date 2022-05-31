@@ -8,7 +8,7 @@ What does your pull request fix or add to the library?
 
 **Testing**
 
-Have you tested the new code using the provided automated test program `thread_pool_test.cpp` and/or performed any other tests to ensure that it works correctly? If so, please provide information about the test system(s):
+Have you tested the new code using the provided automated test program and/or performed any other tests to ensure that it works correctly? If so, please provide information about the test system(s):
 
 * CPU model, architecture, # of cores and threads:
 * Operating system:
