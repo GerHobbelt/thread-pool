@@ -13,6 +13,7 @@
 #define BS_THREAD_POOL_VERSION "v3.3.0 (2022-08-03)"
 
 #include <atomic>             // std::atomic
+#include <cassert>            // assert
 #include <chrono>             // std::chrono
 #include <condition_variable> // std::condition_variable
 #include <exception>          // std::current_exception
@@ -463,6 +464,18 @@ public:
         threads = std::make_unique<std::thread[]>(thread_count);
         paused = was_paused;
         create_threads();
+    }
+
+    void cancel_tasks()
+    {
+        const std::scoped_lock tasks_lock(tasks_mutex);
+        // allow cancelling only if paused:
+        assert(paused);
+        // and no tasks running:
+        assert(tasks_total == tasks.size());
+        // drop all tasks:
+        tasks = {};
+        tasks_total = 0;
     }
 
     /**

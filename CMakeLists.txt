@@ -14,5 +14,10 @@ add_executable(MultiFutureTest
     multi_future_test.cpp
 )
 
+add_executable(ContinuationTest
+    continuation_test.cpp
+)
+
 target_link_libraries(BSTest PRIVATE Threads::Threads)
 target_link_libraries(MultiFutureTest PRIVATE Threads::Threads)
+target_link_libraries(ContinuationTest PRIVATE Threads::Threads)
