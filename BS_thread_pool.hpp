@@ -115,11 +115,26 @@ public:
             futures[i].wait();
     }
 
+    template<class Rep, class Period>
+    std::future_status wait_for(const std::chrono::duration<Rep,Period>& timeout_duration) {
+        auto deadline = std::chrono::steady_clock::now() + timeout_duration;
+        for (;next_awaitable < futures.size(); ++next_awaitable) 
+        {
+            auto status = futures[next_awaitable].wait_until(deadline);
+            if (status == std::future_status::timeout) 
+            {
+                return status;
+            }
+        }
+        return std::future_status::ready;
+    }
+
 private:
     /**
      * @brief A vector to store the futures.
      */
     std::vector<std::future<T>> futures;
+    size_t next_awaitable = 0;
 };
 
 //                                     End class multi_future                                    //
