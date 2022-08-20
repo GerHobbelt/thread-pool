@@ -9,7 +9,7 @@
  */
 
 // Get rid of annoying MSVC warning.
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
@@ -32,6 +32,9 @@
 
 // Include the header file for the thread pool library.
 #include "BS_thread_pool_light.hpp"
+
+namespace
+{
 
 // ================
 // Global variables
@@ -629,6 +632,13 @@ void do_tests()
     print_header("Testing that vector operations produce the expected results:");
     check_vectors();
 }
+
+}
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main      bs_threadpool_light_test_main
+#endif
 
 int main()
 {

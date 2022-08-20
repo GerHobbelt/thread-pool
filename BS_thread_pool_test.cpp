@@ -9,7 +9,7 @@
  */
 
 // Get rid of annoying MSVC warning.
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
@@ -37,6 +37,9 @@
 
 // Include the header file for the thread pool library.
 #include "BS_thread_pool.hpp"
+
+namespace
+{
 
 // ================
 // Global variables
@@ -1021,6 +1024,13 @@ void check_performance()
     }
     print_speedup(different_n_timings, try_tasks);
 }
+
+}
+
+
+#if defined(BUILD_MONOLITHIC)
+#define main      bs_threadpool_test_main
+#endif
 
 int main()
 {
