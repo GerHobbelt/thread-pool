@@ -590,7 +590,7 @@ public:
             if (should_stop_waiting)
                 break;
 
-            if (sleep_duration * sleep_factor < std::chrono::milliseconds(2000))
+            if (sleep_duration * sleep_factor < std::chrono::milliseconds(1000))
             {
                 sleep_factor++;
                 fprintf(stderr, "sleep factor: %d\n", (int)sleep_factor);
@@ -623,7 +623,13 @@ public:
 #endif
             }
 
-            tasks_done_lock.lock();
+			// This is not needed any more, fortunately, as we're steadily increasing the poll period, so, even when it started at zero(0),
+			// each round through here will raise it above that number and there's no need for us to YIELD explicitly:
+#if 0
+			std::this_thread::yield();
+#endif
+
+			tasks_done_lock.lock();
         }
         waiting = false;
     }
@@ -800,20 +806,6 @@ protected:
             }
         }
     }
-
-#if 0
-    /**
-     * @brief Sleep for sleep_duration microseconds. If that variable is set to zero, yield instead.
-     */
-    void sleep_or_yield(int factor = 1)
-    {
-        auto t = sleep_duration * factor;
-        if (t > std::chrono::microseconds::zero())
-            std::this_thread::sleep_for(t);
-        else
-            std::this_thread::yield();
-    }
-#endif
 
     /**
      * @brief A wrapper for the worker function which catches uncaught C++ exceptions and then makes the thread terminate in an orderly fashion.
@@ -1087,12 +1079,14 @@ snprintf(&worker_failure_message[slen], scap, "ERROR: thread::worker unwinding; 
     std::atomic<bool> running = false;
 
     /**
-     * @brief The duration, in milliseconds, that the worker function should sleep for when it cannot find any tasks in the queue. If set to 0, then instead of sleeping, the worker function will execute std::this_thread::yield() if there are no tasks in the queue. The default value is 1000.
+     * @brief The `wait_for_tasks()` poll cycle period, in milliseconds, where after each `sleep_duration` wait_for_tasks() will be incited to broadcast its waiting state to the worker threads so they wake from their potential short slumbers and check all shutdown / reactivation conditions and signal back when they've done so. Consequently, when there's no tasks pending or incoming, thread workers are not woken up, ever, unless `wait_for_tasks()` explicitly asks for them to wake up and check everything, including 'pause mode' and 'shutdown/cleanup' (running == 0).
+	 * If set to 0, then instead of sleeping for a bit when termination conditions have not yet been met, `wait_for_tasks()` will execute std::this_thread::yield(). The default value is 10 milliseconds.
+	 *
+	 * Note that the `sleep_duration` value is only relevant to execution timing of `wait_for_tasks()` when one of these conditions apply:
+	 * - the threadpool has been put into 'pause mode' and there are no more lingering tasks from the previous era being finished, while the queue stays in 'pause mode'.
+	 * - the threadpool is shutting down (running==false, due to threadpool instance cleanup & destruction, usually part of an application shutdown)
      */
-    std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(1000);
-
-    std::condition_variable cv;
-    std::mutex cv_m;
+    std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(10);
 
     /**
      * @brief A condition variable used to notify worker() that a new task has become available.

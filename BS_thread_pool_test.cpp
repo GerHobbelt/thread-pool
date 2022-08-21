@@ -989,6 +989,9 @@ void check_performance()
     const BS::concurrency_t thread_count = pool.get_thread_count();
     dual_println("Using ", thread_count, " threads.");
 
+#if defined(_MSC_VER)
+#pragma warning(disable: 4838) // warning C4838: conversion from 'double' to 'const BS::concurrency_t' requires a narrowing conversion
+#endif
     // Define the number of tasks to try in each run of the test (0 = single-threaded).
     const BS::concurrency_t try_tasks[] = {0, thread_count / 4, thread_count / 3, thread_count / 2, thread_count / 1.5, thread_count / 1.2, thread_count - 1, thread_count, thread_count + 1, thread_count * 1.2, thread_count * 1.5, thread_count * 2, thread_count * 3, thread_count * 4};
 
