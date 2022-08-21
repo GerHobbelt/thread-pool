@@ -593,10 +593,6 @@ public:
 
             if (!running)
             {
-                size_t alive_count = get_alive_threads_count();
-                size_t a = get_tasks_running();
-                size_t b = get_tasks_total();
-
                 // just keep screaming...
                 // Without this, in practice it turns out sometimes a thread (or more) remains stuck for a while...
                 //
