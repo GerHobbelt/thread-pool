@@ -12,15 +12,6 @@
 
 #define BS_THREAD_POOL_VERSION "v3.3.0 (2022-08-03)"
 
-#ifndef BS_THREAD_DEBUG_PRINT
-#define BS_THREAD_DEBUG_PRINT  0
-#endif
-
-#if defined(HAVE_MUPDF)
-#include "tprintf.h"          // for tprintf
-#include "mupdf/assert.h"     // for ASSERT
-#endif
-
 #include <atomic>             // std::atomic
 #include <chrono>             // std::chrono
 #include <condition_variable> // std::condition_variable
@@ -593,7 +584,6 @@ public:
             if (sleep_duration * sleep_factor < std::chrono::milliseconds(1000))
             {
                 sleep_factor++;
-                fprintf(stderr, "sleep factor: %d\n", (int)sleep_factor);
             }
 
             if (!running)
@@ -613,14 +603,6 @@ public:
                 // "This makes it impossible for notify_one() to, for example, be delayed and unblock a thread that started waiting just after the call to notify_one() was made."
                 // Ditto for notify_all() on that one, of course.
                 task_available_cv.notify_all();
-
-#if BS_THREAD_DEBUG_PRINT
-#if defined(HAVE_MUPDF)
-                tesseract::tprintf("threads pending: {}, tasks running: {}, tasks total: {}\n", alive_count, a, b);
-#else
-                fprintf(stderr, "threads pending: %zu, tasks running: %zu, tasks total: %zu\n", alive_count, a, b);
-#endif
-#endif
             }
 
 			// This is not needed any more, fortunately, as we're steadily increasing the poll period, so, even when it started at zero(0),
@@ -750,16 +732,10 @@ protected:
      */
     void worker()
     {
-#if BS_THREAD_DEBUG_PRINT
-        size_t cycle_numero = 0;
-#endif
         while (running)
         {
             std::function<void()> task;
             std::unique_lock<std::mutex> tasks_lock(tasks_mutex);
-#if BS_THREAD_DEBUG_PRINT
-            fprintf(stderr, "worker is going to wait...\n");
-#endif
             task_available_cv.wait(tasks_lock, [this] {
                 // we need to stop waiting when we observe a shutdown is in progress:
                 if (!running)
@@ -772,10 +748,7 @@ protected:
                 // okay, we're running in normal mode when we get here: is there anything for us to do?
                 return !tasks.empty();
             });
-#if BS_THREAD_DEBUG_PRINT
-            cycle_numero++;
-            fprintf(stderr, "worker cycle running:%d paused:%d waiting_for:%d, round #%zu\n", (int)running, (int)paused, (int)waiting, cycle_numero);
-#endif
+
             if (running)
             {
                 if (!paused)
@@ -784,9 +757,6 @@ protected:
                     tasks.pop();
                     tasks_lock.unlock();
 
-#if BS_THREAD_DEBUG_PRINT
-                    fprintf(stderr, "worker exec task\n");
-#endif
                     task();
 
                     tasks_lock.lock();
@@ -794,9 +764,6 @@ protected:
                     // Note: technically, the check for `waiting` is not required. notify_all() will simply signal all *observing* wait_for_tasks() and continue without hesitation anyhow.
                     if (waiting)
                     {
-#if BS_THREAD_DEBUG_PRINT
-                        fprintf(stderr, "worker notifies all wait_for_tasks()\n");
-#endif
                         // We don't know whether zero, one or more control threads are waiting for us in their `wait_for_tasks()` calls, so we do not use .notify_one() but use .notify_all() instead: everybody should be made able to check whether their conditions about the task queue are finally met.
                         //
                         // This solves the issues when multiple controlling threads() call `wait_for_tasks()`.
@@ -934,7 +901,7 @@ protected:
 
 #define select_and_report(x)																																						\
 case x:																																												\
-snprintf(&worker_failure_message[slen], scap, "ERROR: thread::worker unwinding; termination code is %s, current_exception_ptr = 0x%p\n", #x, reinterpret_cast<void *>(p));
+    snprintf(&worker_failure_message[slen], scap, "ERROR: thread::worker unwinding; termination code is %s, current_exception_ptr = 0x%p\n", #x, reinterpret_cast<void *>(p));
 
                 switch (code)
                 {
@@ -1056,11 +1023,7 @@ snprintf(&worker_failure_message[slen], scap, "ERROR: thread::worker unwinding; 
         ASSERT(!abnormal_exit || !worker_failure_message.empty()); // message MUST be filled any time an abnormal termination has been observed.
         if (!worker_failure_message.empty())
         {
-#if defined(HAVE_MUPDF)
-            tesseract::tprintf("ERROR: {}\nWARNING: The thread will terminate/abort now!\n", worker_failure_message);
-#else
             fprintf(stderr, "ERROR: %s\nWARNING: The thread will terminate/abort now!\n", worker_failure_message.c_str());
-#endif
         }
     }
 

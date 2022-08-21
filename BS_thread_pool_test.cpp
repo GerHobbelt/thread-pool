@@ -294,9 +294,6 @@ void check_submit()
     {
         bool flag = false;
         pool.submit([&flag] { 
-#if BS_THREAD_DEBUG_PRINT
-			fprintf(stderr, "task exec\n");
-#endif
 			flag = true;
 		}).wait();
         check(flag);
@@ -314,9 +311,6 @@ void check_submit()
         bool flag1 = false;
         bool flag2 = false;
         pool.submit([](bool* flag1_, bool* flag2_) { 
-#if BS_THREAD_DEBUG_PRINT
-			fprintf(stderr, "task exec\n");
-#endif
 			*flag1_ = *flag2_ = true;
 		}, &flag1, &flag2).wait();
         check(flag1 && flag2);
@@ -327,9 +321,6 @@ void check_submit()
         std::future<int> flag_future = pool.submit(
             [&flag]
             {
-#if BS_THREAD_DEBUG_PRINT
-				fprintf(stderr, "future exec\n");
-#endif
                 flag = true;
                 return 42;
             });
@@ -341,9 +332,6 @@ void check_submit()
         std::future<int> flag_future = pool.submit(
             [](bool* flag_)
             {
-#if BS_THREAD_DEBUG_PRINT
-				fprintf(stderr, "task exec\n");
-#endif
 				*flag_ = true;
                 return 42;
             },
@@ -357,9 +345,6 @@ void check_submit()
         std::future<int> flag_future = pool.submit(
             [](bool* flag1_, bool* flag2_)
             {
-#if BS_THREAD_DEBUG_PRINT
-				fprintf(stderr, "task exec\n");
-#endif
 				*flag1_ = *flag2_ = true;
                 return 42;
             },
