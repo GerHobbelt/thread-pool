@@ -37,21 +37,6 @@
 #pragma warning(pop)
 #endif
 
-#ifndef ASSERT
-#if defined(_WIN32)
-#define ASSERT(expr)			(void)((expr) || (DebugBreak(), 0))
-#else
-#define ASSERT(expr)
-#endif
-#endif
-
-#ifndef ASSERT_AND_CONTINUE
-#if defined(_WIN32)
-#define ASSERT_AND_CONTINUE(expr)			(void)((expr) || (DebugBreak(), 0))
-#else
-#define ASSERT_AND_CONTINUE(expr)
-#endif
-#endif
 
 namespace BS
 {
@@ -479,7 +464,7 @@ public:
         const bool was_paused = paused;
         paused = true;
         wait_for_tasks();
-        ASSERT(!running || get_tasks_running() == 0);
+        //ASSERT(!running || get_tasks_running() == 0);
         destroy_threads();
         thread_count = determine_thread_count(thread_count_);
         threads = std::make_unique<std::thread[]>(thread_count);
@@ -804,7 +789,6 @@ protected:
             {
                 // see also the comments in the workerthread_main() method
                 size_t scap = worker_failure_message.capacity();
-                ASSERT_AND_CONTINUE(scap >= 80);
                 if (scap >= 80)
                 {
                     snprintf(&worker_failure_message[0], scap, "thread::worker caught unhandled C++ exception: %s", e.what());
@@ -843,8 +827,6 @@ protected:
      */
     [[nodiscard]] bool __worker_SEH(std::string &worker_failure_message)
     {
-        ASSERT_AND_CONTINUE(worker_failure_message.capacity() >= 70 + 150 + 80);
-
         alive_threads_count++;
 
         __try
@@ -862,7 +844,6 @@ protected:
                 // see also the comments in the workerthread_main() method
                 size_t slen = worker_failure_message.length();
                 size_t scap = worker_failure_message.capacity() - slen;
-                ASSERT_AND_CONTINUE(scap >= 70);
                 if (scap >= 70)
                 {
                     if (slen > 0)
@@ -871,7 +852,6 @@ protected:
                         scap--;
                     }
                     snprintf(&worker_failure_message[slen], scap, "%s: thread::worker unwinding; termination is %s.", AbnormalTermination() ? "ERROR" : "INFO", AbnormalTermination() ? "ABNORMAL" : "normal");
-                    ASSERT(strlen(&worker_failure_message[slen]) < 70);
                 }
             }
         }
@@ -890,7 +870,6 @@ protected:
             // see also the comments in the workerthread_main() method
             size_t slen = worker_failure_message.length();
             size_t scap = worker_failure_message.capacity() - slen;
-            ASSERT_AND_CONTINUE(scap >= 150);
             if (scap >= 150)
             {
                 if (slen > 0)
@@ -961,7 +940,6 @@ case x:																																												\
                     break;
                 }
                 worker_failure_message[scap - 1] = 0;		// snprintf() doesn't guarantee a NUL at the end. **We do.**
-                ASSERT(strlen(&worker_failure_message[slen]) < 150);
 
 #if 0
                 if (p)
@@ -990,8 +968,6 @@ case x:																																												\
      */
     [[nodiscard]] bool __worker_SEH(std::string &worker_failure_message)
     {
-        ASSERT_AND_CONTINUE(worker_failure_message.capacity() >= 80);
-
         alive_threads_count++;
         bool rv = __worker(worker_failure_message);
         alive_threads_count--;
@@ -1016,11 +992,11 @@ case x:																																												\
         // - https://stackoverflow.com/questions/6700480/how-to-create-a-stdstring-directly-from-a-char-array-without-copying#comments-6700534 :: "Yes, it is permitted in C++11. There's a lot of arcane wording around this, which pretty much boils down to it being illegal to modify the null terminator, and being illegal to modify anything through the data() or c_str() pointers, but valid through &str[0]. stackoverflow.com/a/14291203/5696" – John Calsbeek
         std::string worker_failure_message;
         worker_failure_message.reserve(worker_failure_message_size);
-        ASSERT(worker_failure_message.capacity() >= worker_failure_message_size);
+        //ASSERT(worker_failure_message.capacity() >= worker_failure_message_size);
 
         bool abnormal_exit = __worker_SEH(worker_failure_message);
 
-        ASSERT(!abnormal_exit || !worker_failure_message.empty()); // message MUST be filled any time an abnormal termination has been observed.
+        //ASSERT(!abnormal_exit || !worker_failure_message.empty()); // message MUST be filled any time an abnormal termination has been observed.
         if (!worker_failure_message.empty())
         {
             fprintf(stderr, "ERROR: %s\nWARNING: The thread will terminate/abort now!\n", worker_failure_message.c_str());
