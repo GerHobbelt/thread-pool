@@ -593,14 +593,23 @@ public:
             if (sleep_duration * sleep_factor < std::chrono::milliseconds(1000))
             {
                 sleep_factor++;
+
+#if BS_THREAD_DEBUG_PRINT
+#if defined(HAVE_MUPDF)
+                tesseract::tprintf("sleep factor: {}\n", (int)sleep_factor);
+#else
                 fprintf(stderr, "sleep factor: %d\n", (int)sleep_factor);
+#endif
+#endif
             }
 
             if (!running)
             {
+#if BS_THREAD_DEBUG_PRINT
                 size_t alive_count = get_alive_threads_count();
                 size_t a = get_tasks_running();
                 size_t b = get_tasks_total();
+#endif
 
                 // just keep screaming...
                 // Without this, in practice it turns out sometimes a thread (or more) remains stuck for a while...
