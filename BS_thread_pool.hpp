@@ -26,6 +26,32 @@
 #include <type_traits>        // std::common_type_t, std::conditional_t, std::decay_t, std::invoke_result_t, std::is_void_v
 #include <utility>            // std::forward, std::move, std::swap
 #include <vector>             // std::vector
+#include <stdexcept>
+#if defined(_MSC_VER)
+// see also https://docs.microsoft.com/en-us/cpp/cpp/try-except-statement?view=msvc-170 et al.
+#include <windows.h>
+#include <excpt.h>
+#pragma warning(push)
+#pragma warning(disable: 4005) // warning C4005: macro redefinition
+#include <ntstatus.h> // STATUS_POSSIBLE_DEADLOCK
+#pragma warning(pop)
+#endif
+
+#ifndef ASSERT
+#if defined(_WIN32)
+#define ASSERT(expr)			(void)((expr) || (DebugBreak(), 0))
+#else
+#define ASSERT(expr)
+#endif
+#endif
+
+#ifndef ASSERT_AND_CONTINUE
+#if defined(_WIN32)
+#define ASSERT_AND_CONTINUE(expr)			(void)((expr) || (DebugBreak(), 0))
+#else
+#define ASSERT_AND_CONTINUE(expr)
+#endif
+#endif
 
 namespace BS
 {
@@ -249,7 +275,7 @@ public:
      *
      * @param thread_count_ The number of threads to use. The default value is the total number of hardware threads available, as reported by the implementation. This is usually determined by the number of cores in the CPU. If a core is hyperthreaded, it will count as two threads.
      */
-    thread_pool(const concurrency_t thread_count_ = 0) : thread_count(determine_thread_count(thread_count_)), threads(std::make_unique<std::thread[]>(determine_thread_count(thread_count_)))
+    thread_pool(const int thread_count_ = 0) : thread_count(determine_thread_count(thread_count_)), threads(std::make_unique<std::thread[]>(determine_thread_count(thread_count_)))
     {
         create_threads();
     }
@@ -297,6 +323,16 @@ public:
     [[nodiscard]] size_t get_tasks_total() const
     {
         return tasks_total;
+    }
+
+    /**
+     * @brief Get the total number of alive threads in the threadpool. This number SHOULD match `thread_count`: a lower value means one or more threadpool threads have terminated already, most probably due to catastrophic failure(s) in the tasks.
+     *
+     * @return The total number of threads.
+     */
+    [[nodiscard]] size_t get_alive_threads_count() const
+    {
+        return alive_threads_count;
     }
 
     /**
@@ -438,12 +474,12 @@ public:
      *
      * @param thread_count_ The number of threads to use. The default value is the total number of hardware threads available, as reported by the implementation. This is usually determined by the number of cores in the CPU. If a core is hyperthreaded, it will count as two threads.
      */
-    void reset(const concurrency_t thread_count_ = 0)
+    void reset(const int thread_count_ = 0)
     {
         const bool was_paused = paused;
         paused = true;
         wait_for_tasks();
-        //ASSERT(!running || get_tasks_running() == 0);
+        ASSERT(!running || get_tasks_running() == 0);
         destroy_threads();
         thread_count = determine_thread_count(thread_count_);
         threads = std::make_unique<std::thread[]>(thread_count);
@@ -524,6 +560,8 @@ public:
     void wait_for_tasks()
     {
         waiting = true;
+        int sleep_factor = 1;
+
         std::unique_lock<std::mutex> tasks_done_lock(tasks_done_mutex);
 
         // https://en.cppreference.com/w/cpp/thread/condition_variable/wait_for
@@ -535,13 +573,18 @@ public:
         // As we don't know who or when will set `running = false`, we can't just do this for when we are already shutting down ourselves, but must do so at all times, so we can timely observe `running == false` conditions happening.
         for (;;)
         {
-            bool should_stop_waiting = task_done_cv.wait_for(tasks_done_lock, sleep_duration, [this] {
+            bool should_stop_waiting = task_done_cv.wait_for(tasks_done_lock, sleep_duration * sleep_factor, [this] {
                 return !should_continue_waiting_for_tasks();
             });
             tasks_done_lock.unlock();
 
             if (should_stop_waiting)
                 break;
+
+            if (sleep_duration * sleep_factor < std::chrono::milliseconds(1000))
+            {
+                sleep_factor++;
+            }
 
             if (!running)
             {
@@ -558,17 +601,20 @@ public:
                 task_available_cv.notify_all();
             }
 
-            if (sleep_duration == std::chrono::milliseconds::zero())
-    			std::this_thread::yield();
+			// This is not needed any more, fortunately, as we're steadily increasing the poll period, so, even when it started at zero(0),
+			// each round through here will raise it above that number and there's no need for us to YIELD explicitly:
+#if 0
+			std::this_thread::yield();
+#endif
 
 			tasks_done_lock.lock();
         }
         waiting = false;
     }
 
-private:
+protected:
     // ========================
-    // Private member functions
+    // Protected member functions
     // ========================
 
     /**
@@ -578,6 +624,9 @@ private:
      */
     bool should_continue_waiting_for_tasks()
     {
+        if (get_alive_threads_count() == 0)
+            return false;
+
         if (running)
         {
             if (!paused)
@@ -625,7 +674,7 @@ private:
         running = true;
         for (concurrency_t i = 0; i < thread_count; ++i)
         {
-            threads[i] = std::thread(&thread_pool::worker, this);
+            threads[i] = std::thread(&thread_pool::workerthread_main, this);
         }
     }
 
@@ -646,19 +695,31 @@ private:
     /**
      * @brief Determine how many threads the pool should have, based on the parameter passed to the constructor or reset().
      *
-     * @param thread_count_ The parameter passed to the constructor or reset(). If the parameter is a positive number, then the pool will be created with this number of threads. If the parameter is non-positive, or a parameter was not supplied (in which case it will have the default value of 0), then the pool will be created with the total number of hardware threads available, as obtained from std::thread::hardware_concurrency(). If the latter returns a non-positive number for some reason, then the pool will be created with just one thread.
+     * @param thread_count_ The parameter passed to the constructor or reset(). If the parameter is a positive number, then the pool will be created with this number of threads. If the parameter is zero, or a parameter was not supplied (in which case it will have the default value of 0), then the pool will be created with the total number of hardware threads available, as obtained from std::thread::hardware_concurrency(). If the parameter is negative, then the pool will be created with the total number of hardware threads available, as obtained from std::thread::hardware_concurrency(), reduced by the given parameter value. You may use this variant when you wish to set a threadpool that's occupying only a limited number of cores on a multicore processor.
+     *
+     * If the calculated count is a non-positive number for some reason, then 1 will be assumed (and consequently the pool will be created with just one thread).
+     *
      * @return The number of threads to use for constructing the pool.
      */
-    [[nodiscard]] concurrency_t determine_thread_count(const concurrency_t thread_count_)
+    [[nodiscard]] concurrency_t determine_thread_count(const int thread_count_)
     {
         if (thread_count_ > 0)
             return thread_count_;
         else
         {
-            if (std::thread::hardware_concurrency() > 0)
-                return std::thread::hardware_concurrency();
+            auto cpu_count = std::thread::hardware_concurrency();
+            if (cpu_count > 0)
+            {
+                // restrict the number of threads to MAX(1, #CPUs - ABS(thread_count_))
+                if (-thread_count_ >= cpu_count)
+                    return 1;
+                else
+                    return cpu_count + thread_count_;
+            }
             else
+            {
                 return 1;
+            }
         }
     }
 
@@ -706,6 +767,259 @@ private:
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * @brief A wrapper for the worker function which catches uncaught C++ exceptions and then makes the thread terminate in an orderly fashion.
+     *
+     * This method is supposed to invoke the `worker()` method.
+     *
+     * @return `true` when a catastrophic failure was detected (and caused the thread to terminate). `false` for normal termination.
+     */
+    [[nodiscard]] bool __worker(std::string &worker_failure_message)
+    {
+        try
+        {
+            worker();
+
+            return false;
+        }
+        catch (...)
+        {
+            // don't care that much no more. Still, try to log it.
+            std::exception_ptr p = std::current_exception();
+            try
+            {
+                if (p)
+                {
+                    std::rethrow_exception(p);
+                }
+            }
+            catch (const std::exception& e)
+            {
+                // see also the comments in the workerthread_main() method
+                size_t scap = worker_failure_message.capacity();
+                ASSERT_AND_CONTINUE(scap >= 80);
+                if (scap >= 80)
+                {
+                    snprintf(&worker_failure_message[0], scap, "thread::worker caught unhandled C++ exception: %s", e.what());
+                    worker_failure_message[scap - 1] = 0;		// snprintf() doesn't guarantee a NUL at the end. **We do.**
+                }
+            }
+            return true;
+        }
+    }
+
+// MSVC supports hardware SEH:
+#if defined(_MSC_VER)
+
+    struct _EXCEPTION_POINTERS __ex_info ={0};
+
+    int ex_filter(unsigned long code, struct _EXCEPTION_POINTERS *info)
+    {
+        if (info != NULL)
+        {
+            __ex_info = *info;
+        }
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
+
+#endif
+
+// MSVC supports hardware SEH:
+#if defined(_MSC_VER)
+
+    /**
+     * @brief An outer wrapper for the worker function which catches uncaught SEH (hardware) exceptions and then makes the thread terminate in an orderly fashion.
+     *
+     * This method is supposed to invoke the `__worker()` method.
+     *
+     * @return `true` when a catastrophic failure was detected (and caused the thread to terminate). `false` for normal termination.
+     */
+    [[nodiscard]] bool __worker_SEH(std::string &worker_failure_message)
+    {
+        ASSERT_AND_CONTINUE(worker_failure_message.capacity() >= 70 + 150 + 80);
+
+        alive_threads_count++;
+
+        __try
+        {
+            __try
+            {
+                return __worker(worker_failure_message);
+            }
+            __finally
+            {
+                alive_threads_count--;
+
+                // append to exit message, if any
+                //
+                // see also the comments in the workerthread_main() method
+                size_t slen = worker_failure_message.length();
+                size_t scap = worker_failure_message.capacity() - slen;
+                ASSERT_AND_CONTINUE(scap >= 70);
+                if (scap >= 70)
+                {
+                    if (slen > 0)
+                    {
+                        worker_failure_message[slen++] = '\n';
+                        scap--;
+                    }
+                    snprintf(&worker_failure_message[slen], scap, "%s: thread::worker unwinding; termination is %s.", AbnormalTermination() ? "ERROR" : "INFO", AbnormalTermination() ? "ABNORMAL" : "normal");
+                    ASSERT(strlen(&worker_failure_message[slen]) < 70);
+                }
+            }
+        }
+        __except (ex_filter(GetExceptionCode(), GetExceptionInformation()))
+        {
+            struct _EXCEPTION_POINTERS ex_info = __ex_info;
+            auto code = GetExceptionCode();
+#if 0
+            std::exception_ptr p = std::current_exception();
+#else
+            void *p = ex_info.ExceptionRecord->ExceptionAddress;
+#endif
+
+            // append to exit message, if any
+            //
+            // see also the comments in the workerthread_main() method
+            size_t slen = worker_failure_message.length();
+            size_t scap = worker_failure_message.capacity() - slen;
+            ASSERT_AND_CONTINUE(scap >= 150);
+            if (scap >= 150)
+            {
+                if (slen > 0)
+                {
+                    worker_failure_message[slen++] = '\n';
+                    scap--;
+                }
+
+#define select_and_report(x)																																						\
+case x:																																												\
+    snprintf(&worker_failure_message[slen], scap, "ERROR: thread::worker unwinding; termination code is %s, current_exception_ptr = 0x%p\n", #x, reinterpret_cast<void *>(p));
+
+                switch (code)
+                {
+                default:
+                    snprintf(&worker_failure_message[slen], scap, "ERROR: thread::worker unwinding; termination code is %s, current_exception_ptr = 0x%p\n", "**UNKNOWN**", reinterpret_cast<void *>(p));
+                    break;
+
+                select_and_report(STILL_ACTIVE)
+                    break;
+                select_and_report(EXCEPTION_ACCESS_VIOLATION)
+                    break;
+                select_and_report(EXCEPTION_DATATYPE_MISALIGNMENT)
+                    break;
+                select_and_report(EXCEPTION_BREAKPOINT)
+                    break;
+                select_and_report(EXCEPTION_SINGLE_STEP)
+                    break;
+                select_and_report(EXCEPTION_ARRAY_BOUNDS_EXCEEDED)
+                    break;
+                select_and_report(EXCEPTION_FLT_DENORMAL_OPERAND)
+                    break;
+                select_and_report(EXCEPTION_FLT_DIVIDE_BY_ZERO)
+                    break;
+                select_and_report(EXCEPTION_FLT_INEXACT_RESULT)
+                    break;
+                select_and_report(EXCEPTION_FLT_INVALID_OPERATION)
+                    break;
+                select_and_report(EXCEPTION_FLT_OVERFLOW)
+                    break;
+                select_and_report(EXCEPTION_FLT_STACK_CHECK)
+                    break;
+                select_and_report(EXCEPTION_FLT_UNDERFLOW)
+                    break;
+                select_and_report(EXCEPTION_INT_DIVIDE_BY_ZERO)
+                    break;
+                select_and_report(EXCEPTION_INT_OVERFLOW)
+                    break;
+                select_and_report(EXCEPTION_PRIV_INSTRUCTION)
+                    break;
+                select_and_report(EXCEPTION_IN_PAGE_ERROR)
+                    break;
+                select_and_report(EXCEPTION_ILLEGAL_INSTRUCTION)
+                    break;
+                select_and_report(EXCEPTION_NONCONTINUABLE_EXCEPTION)
+                    break;
+                select_and_report(EXCEPTION_STACK_OVERFLOW)
+                    break;
+                select_and_report(EXCEPTION_INVALID_DISPOSITION)
+                    break;
+                select_and_report(EXCEPTION_GUARD_PAGE)
+                    break;
+                select_and_report(EXCEPTION_INVALID_HANDLE)
+                    break;
+                select_and_report(EXCEPTION_POSSIBLE_DEADLOCK)
+                    break;
+                select_and_report(CONTROL_C_EXIT)
+                    break;
+                }
+                worker_failure_message[scap - 1] = 0;		// snprintf() doesn't guarantee a NUL at the end. **We do.**
+                ASSERT(strlen(&worker_failure_message[slen]) < 150);
+
+#if 0
+                if (p)
+                {
+                    std::rethrow_exception(p);
+                }
+#endif
+
+                // TODO:
+                // - RaiseException https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-raiseexception
+                // - SetThreadErrorMode https://docs.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-setthreaderrormode
+            }
+
+            return true;
+        }
+    }
+
+#else
+
+    /**
+     * @brief An outer wrapper for the worker function which catches uncaught SEH (hardware) exceptions and then makes the thread terminate in an orderly fashion.
+     *
+     * This method is supposed to invoke the `__worker()` method.
+     *
+     * @return `true` when a catastrophic failure was detected (and caused the thread to terminate). `false` for normal termination.
+     */
+    [[nodiscard]] bool __worker_SEH(std::string &worker_failure_message)
+    {
+        ASSERT_AND_CONTINUE(worker_failure_message.capacity() >= 80);
+
+        alive_threads_count++;
+        bool rv = __worker(worker_failure_message);
+        alive_threads_count--;
+        return rv;
+    }
+
+#endif
+
+    const size_t worker_failure_message_size = 2048;
+
+    /**
+     * @brief The base wrapper for the thread worker. Can be overridden in derived classes if your application needs special preparations in your worker threads.
+     *
+     * This method is supposed to invoke the `__worker_SEH()` method, which, together with the `__worker()` method, is expected to be able to process all normal thread terminations and catch all catchable catastrophic thread failures.
+     *
+     * Your derivative `workerthread_main()` can use the return value from `__worker_SEH()` to drive any last application-specific post-catastrophe thread termination actions.
+     */
+    virtual void workerthread_main()
+    {
+        // You SHOULD reserve space for any caught thread fatality report. We SHOULD have this space already present beforehand as we cannot trust the system to do much of anything any more when we happen to encounter such a catastrophic situation.
+        //
+        // - https://stackoverflow.com/questions/6700480/how-to-create-a-stdstring-directly-from-a-char-array-without-copying#comments-6700534 :: "Yes, it is permitted in C++11. There's a lot of arcane wording around this, which pretty much boils down to it being illegal to modify the null terminator, and being illegal to modify anything through the data() or c_str() pointers, but valid through &str[0]. stackoverflow.com/a/14291203/5696" – John Calsbeek
+        std::string worker_failure_message;
+        worker_failure_message.reserve(worker_failure_message_size);
+        ASSERT(worker_failure_message.capacity() >= worker_failure_message_size);
+
+        bool abnormal_exit = __worker_SEH(worker_failure_message);
+
+        ASSERT(!abnormal_exit || !worker_failure_message.empty()); // message MUST be filled any time an abnormal termination has been observed.
+        if (!worker_failure_message.empty())
+        {
+            fprintf(stderr, "ERROR: %s\nWARNING: The thread will terminate/abort now!\n", worker_failure_message.c_str());
         }
     }
 
@@ -786,6 +1100,13 @@ private:
      * @brief An atomic variable indicating that wait_for_tasks() is active and expects to be notified whenever a task is done.
      */
     std::atomic<bool> waiting = false;
+
+    /**
+     * @brief An atomic variable to keep track of the total number of activated threads - each is either waiting for a task or executing a task. That last count is tracked by `tasks_total`, by the way.
+     *
+     * The `alive_threads_count` number is equal to the `threads_count` number, unless catastrophic failures in one or more of the threadpool threads have caused their termination.
+     */
+    std::atomic<size_t> alive_threads_count = 0;
 };
 
 //                                     End class thread_pool                                     //
