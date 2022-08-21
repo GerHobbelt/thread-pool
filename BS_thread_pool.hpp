@@ -534,8 +534,6 @@ public:
     void wait_for_tasks()
     {
         waiting = true;
-        int sleep_factor = 1;
-
         std::unique_lock<std::mutex> tasks_done_lock(tasks_done_mutex);
 
         // https://en.cppreference.com/w/cpp/thread/condition_variable/wait_for
@@ -547,7 +545,7 @@ public:
         // As we don't know who or when will set `running = false`, we can't just do this for when we are already shutting down ourselves, but must do so at all times, so we can timely observe `running == false` conditions happening.
         for (;;)
         {
-            bool should_stop_waiting = task_done_cv.wait_for(tasks_done_lock, sleep_duration * sleep_factor, [this] {
+            bool should_stop_waiting = task_done_cv.wait_for(tasks_done_lock, sleep_duration, [this] {
                 return !should_continue_waiting_for_tasks();
             });
             tasks_done_lock.unlock();
@@ -555,17 +553,8 @@ public:
             if (should_stop_waiting)
                 break;
 
-            if (sleep_duration * sleep_factor < std::chrono::milliseconds(1000))
-            {
-                sleep_factor++;
-            }
-
             if (!running)
             {
-                size_t alive_count = get_alive_threads_count();
-                size_t a = get_tasks_running();
-                size_t b = get_tasks_total();
-
                 // just keep screaming...
                 // Without this, in practice it turns out sometimes a thread (or more) remains stuck for a while...
                 //
@@ -579,11 +568,8 @@ public:
                 task_available_cv.notify_all();
             }
 
-			// This is not needed any more, fortunately, as we're steadily increasing the poll period, so, even when it started at zero(0),
-			// each round through here will raise it above that number and there's no need for us to YIELD explicitly:
-#if 0
-			std::this_thread::yield();
-#endif
+            if (sleep_duration == std::chrono::milliseconds::zero())
+    			std::this_thread::yield();
 
 			tasks_done_lock.lock();
         }
