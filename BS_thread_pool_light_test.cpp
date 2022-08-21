@@ -33,6 +33,16 @@
 // Include the header file for the thread pool library.
 #include "BS_thread_pool_light.hpp"
 
+#if defined(BUILD_MONOLITHIC)
+#include "monolithic_examples.h"
+#endif
+
+// fix for MSVC/WIN32:
+#undef min
+#undef max
+
+#if 01
+
 namespace
 {
 
@@ -197,14 +207,18 @@ void check_push_task()
     println("Checking that push_task() works for a function with no arguments or return value...");
     {
         bool flag = false;
-        pool.push_task([&flag] { flag = true; });
+        pool.push_task([&flag] {
+			flag = true;
+		});
         pool.wait_for_tasks();
         check(flag);
     }
     println("Checking that push_task() works for a function with one argument and no return value...");
     {
         bool flag = false;
-        pool.push_task([](bool* flag_) { *flag_ = true; }, &flag);
+        pool.push_task([](bool* flag_) {
+			*flag_ = true;
+		}, &flag);
         pool.wait_for_tasks();
         check(flag);
     }
@@ -212,7 +226,9 @@ void check_push_task()
     {
         bool flag1 = false;
         bool flag2 = false;
-        pool.push_task([](bool* flag1_, bool* flag2_) { *flag1_ = *flag2_ = true; }, &flag1, &flag2);
+        pool.push_task([](bool* flag1_, bool* flag2_) {
+			*flag1_ = *flag2_ = true;
+		}, &flag1, &flag2);
         pool.wait_for_tasks();
         check(flag1 && flag2);
     }
@@ -226,20 +242,26 @@ void check_submit()
     println("Checking that submit() works for a function with no arguments or return value...");
     {
         bool flag = false;
-        pool.submit([&flag] { flag = true; }).wait();
+        pool.submit([&flag] { 
+			flag = true; 
+		}).wait();
         check(flag);
     }
     println("Checking that submit() works for a function with one argument and no return value...");
     {
         bool flag = false;
-        pool.submit([](bool* flag_) { *flag_ = true; }, &flag).wait();
+        pool.submit([](bool* flag_) { 
+			*flag_ = true; 
+		}, &flag).wait();
         check(flag);
     }
     println("Checking that submit() works for a function with two arguments and no return value...");
     {
         bool flag1 = false;
         bool flag2 = false;
-        pool.submit([](bool* flag1_, bool* flag2_) { *flag1_ = *flag2_ = true; }, &flag1, &flag2).wait();
+        pool.submit([](bool* flag1_, bool* flag2_) { 
+			*flag1_ = *flag2_ = true; 
+		}, &flag1, &flag2).wait();
         check(flag1 && flag2);
     }
     println("Checking that submit() works for a function with no arguments and a return value...");
@@ -665,3 +687,50 @@ int main()
         return EXIT_FAILURE;
     }
 }
+
+#else
+
+// ================
+// Helper functions
+// ================
+
+/**
+ * @brief Print any number of items into both std::cout and the log file, syncing both independently.
+ *
+ * @tparam T The types of the items.
+ * @param items The items to print.
+ */
+template <typename... T>
+void print(T&&... items)
+{
+	(std::cout << ... << std::forward<T>(items));
+}
+
+/**
+ * @brief Print any number of items into both std::cout and the log file, syncing both independently. Also prints a newline character, and flushes the stream.
+ *
+ * @tparam T The types of the items.
+ * @param items The items to print.
+ */
+template <typename... T>
+void println(T&&... items)
+{
+	print(std::forward<T>(items)..., static_cast<std::ostream& (&)(std::ostream&)>(std::endl));
+}
+
+#if defined(BUILD_MONOLITHIC)
+#define main      bs_threadpool_light_test_main
+#endif
+
+int main()
+{
+	println("BS::thread_pool_light: a fast, lightweight, and easy-to-use C++17 thread pool library");
+	println("(c) 2022 Barak Shoshany (baraksh@gmail.com) (http://baraksh.com)");
+	println("GitHub: https://github.com/bshoshany/thread-pool\n");
+
+	println("Thread pool library version is ", BS_THREAD_POOL_VERSION, ".");
+	println("Hardware concurrency is ", std::thread::hardware_concurrency(), ".");
+	return 0;
+}
+
+#endif

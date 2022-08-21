@@ -38,6 +38,14 @@
 // Include the header file for the thread pool library.
 #include "BS_thread_pool.hpp"
 
+#if defined(BUILD_MONOLITHIC)
+#include "monolithic_examples.h"
+#endif
+
+// fix for MSVC/WIN32:
+#undef min
+#undef max
+
 namespace
 {
 
@@ -217,6 +225,8 @@ void check_constructor()
     check(std::thread::hardware_concurrency(), pool.get_thread_count());
     dual_println("Checking that the manually counted number of unique thread IDs is equal to the reported number of threads...");
     check(pool.get_thread_count(), count_unique_threads());
+	dual_println("Checking that the tracked number of alive threads is equal to the setup thread count...");
+	check(pool.get_thread_count(), pool.get_alive_threads_count());
 }
 
 /**
@@ -248,14 +258,18 @@ void check_push_task()
     dual_println("Checking that push_task() works for a function with no arguments or return value...");
     {
         bool flag = false;
-        pool.push_task([&flag] { flag = true; });
+        pool.push_task([&flag] {
+			flag = true;
+		});
         pool.wait_for_tasks();
         check(flag);
     }
     dual_println("Checking that push_task() works for a function with one argument and no return value...");
     {
         bool flag = false;
-        pool.push_task([](bool* flag_) { *flag_ = true; }, &flag);
+        pool.push_task([](bool* flag_) {
+			*flag_ = true;
+		}, &flag);
         pool.wait_for_tasks();
         check(flag);
     }
@@ -263,7 +277,9 @@ void check_push_task()
     {
         bool flag1 = false;
         bool flag2 = false;
-        pool.push_task([](bool* flag1_, bool* flag2_) { *flag1_ = *flag2_ = true; }, &flag1, &flag2);
+        pool.push_task([](bool* flag1_, bool* flag2_) {
+			*flag1_ = *flag2_ = true;
+		}, &flag1, &flag2);
         pool.wait_for_tasks();
         check(flag1 && flag2);
     }
@@ -277,20 +293,32 @@ void check_submit()
     dual_println("Checking that submit() works for a function with no arguments or return value...");
     {
         bool flag = false;
-        pool.submit([&flag] { flag = true; }).wait();
+        pool.submit([&flag] { 
+#if BS_THREAD_DEBUG_PRINT
+			fprintf(stderr, "task exec\n");
+#endif
+			flag = true;
+		}).wait();
         check(flag);
     }
     dual_println("Checking that submit() works for a function with one argument and no return value...");
     {
         bool flag = false;
-        pool.submit([](bool* flag_) { *flag_ = true; }, &flag).wait();
+        pool.submit([](bool* flag_) { 
+			*flag_ = true; 
+		}, &flag).wait();
         check(flag);
     }
     dual_println("Checking that submit() works for a function with two arguments and no return value...");
     {
         bool flag1 = false;
         bool flag2 = false;
-        pool.submit([](bool* flag1_, bool* flag2_) { *flag1_ = *flag2_ = true; }, &flag1, &flag2).wait();
+        pool.submit([](bool* flag1_, bool* flag2_) { 
+#if BS_THREAD_DEBUG_PRINT
+			fprintf(stderr, "task exec\n");
+#endif
+			*flag1_ = *flag2_ = true;
+		}, &flag1, &flag2).wait();
         check(flag1 && flag2);
     }
     dual_println("Checking that submit() works for a function with no arguments and a return value...");
@@ -299,6 +327,9 @@ void check_submit()
         std::future<int> flag_future = pool.submit(
             [&flag]
             {
+#if BS_THREAD_DEBUG_PRINT
+				fprintf(stderr, "future exec\n");
+#endif
                 flag = true;
                 return 42;
             });
@@ -310,7 +341,10 @@ void check_submit()
         std::future<int> flag_future = pool.submit(
             [](bool* flag_)
             {
-                *flag_ = true;
+#if BS_THREAD_DEBUG_PRINT
+				fprintf(stderr, "task exec\n");
+#endif
+				*flag_ = true;
                 return 42;
             },
             &flag);
@@ -323,7 +357,10 @@ void check_submit()
         std::future<int> flag_future = pool.submit(
             [](bool* flag1_, bool* flag2_)
             {
-                *flag1_ = *flag2_ = true;
+#if BS_THREAD_DEBUG_PRINT
+				fprintf(stderr, "task exec\n");
+#endif
+				*flag1_ = *flag2_ = true;
                 return 42;
             },
             &flag1, &flag2);
@@ -953,14 +990,14 @@ void check_performance()
     dual_println("Using ", thread_count, " threads.");
 
     // Define the number of tasks to try in each run of the test (0 = single-threaded).
-    const BS::concurrency_t try_tasks[] = {0, thread_count / 4, thread_count / 2, thread_count, thread_count * 2, thread_count * 4};
+    const BS::concurrency_t try_tasks[] = {0, thread_count / 4, thread_count / 3, thread_count / 2, thread_count / 1.5, thread_count / 1.2, thread_count - 1, thread_count, thread_count + 1, thread_count * 1.2, thread_count * 1.5, thread_count * 2, thread_count * 3, thread_count * 4};
 
     // How many times to repeat each run of the test in order to collect reliable statistics.
     constexpr size_t repeat = 20;
     dual_println("Each test will be repeated ", repeat, " times to collect reliable statistics.");
 
     // The target execution time, in milliseconds, of the multi-threaded test with the number of blocks equal to the number of threads. The total time spent on that test will be approximately equal to repeat * target_ms.
-    constexpr std::chrono::milliseconds::rep target_ms = 50;
+    constexpr std::chrono::milliseconds::rep target_ms = 100;
 
     // Test how many vectors we need to generate, and of what size, to roughly achieve the target execution time.
     dual_println("Determining the number and size of vectors to generate in order to achieve an approximate mean execution time of ", target_ms, " ms with ", thread_count, " tasks...");
@@ -975,16 +1012,25 @@ void check_performance()
                 vectors[i][j] = generate_element(i, j);
         }
     };
-    do
+	float extrapolate_factor;
+	float damped_extrapolate_factor = 2.0;
+	float previous_extrapolate_factor = 0.0;
+	float extrapolate_factor_delta;
+	do
     {
-        num_vectors *= 2;
-        vector_size *= 2;
+        num_vectors *= damped_extrapolate_factor;
+        vector_size *= damped_extrapolate_factor;
         vectors = std::vector<std::vector<double>>(num_vectors, std::vector<double>(vector_size));
         tmr.start();
         pool.push_loop(num_vectors, loop);
         pool.wait_for_tasks();
         tmr.stop();
-    } while (tmr.ms() < target_ms);
+		extrapolate_factor = (target_ms + 1.0) / (tmr.ms() + 1.0);                             // prevent div/0 and as a side effect cast both times to float before dividing for a better ratio number.
+		damped_extrapolate_factor = fminf(fmaxf(extrapolate_factor, 0.6), 2.0);                // damp the extrapol factor as we WILL observe wild timings and should not immediately react to those.
+		extrapolate_factor_delta = fabsf(extrapolate_factor - previous_extrapolate_factor);    // this measures the estimation "stabilizing", when this delta approaches zero. This takes care of the rough timing noise.
+		fprintf(stderr, "tmr.ms: %4d, target_ms: %d, factor: %f, damped: %f, delta: %f, vector_size: %zu\n", (int)tmr.ms(), (int)target_ms, extrapolate_factor, damped_extrapolate_factor, extrapolate_factor_delta, vector_size);
+		previous_extrapolate_factor = extrapolate_factor;
+	} while (/* measured time : time target outside +/- 10% margin */ lroundf(extrapolate_factor * 10) != 10 || /* growth delta > 12% */ extrapolate_factor_delta >= 0.12);
     num_vectors = thread_count * static_cast<size_t>(std::llround(static_cast<double>(num_vectors) * static_cast<double>(target_ms) / static_cast<double>(tmr.ms()) / thread_count));
 
     // Initialize the desired number of vectors.
