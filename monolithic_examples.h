@@ -9,6 +9,7 @@ extern "C" {
 
 int bs_threadpool_light_test_main();
 int bs_threadpool_test_main();
+int bs_threadpool_maniacal_test_main();
 
 #ifdef __cplusplus
 }
