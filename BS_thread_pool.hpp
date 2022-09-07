@@ -14,7 +14,7 @@
 
 #if defined(HAVE_MUPDF)
 #include "tprintf.h"          // for tprintf
-#include "mupdf/assert.h"     // for ASSERT
+#include "mupdf/assertions.h"     // for ASSERT
 #endif
 
 #include <atomic>             // std::atomic
