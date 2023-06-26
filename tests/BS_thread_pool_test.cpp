@@ -277,7 +277,7 @@ void check_deadlock(const F&& task)
     constexpr uint32_t tries = 10000;
     uint32_t i = 0;
     check_deadlock_pool.push_task(
-        [&i, &task]
+        [tries, &i, &task]
         {
             do
                 task();
