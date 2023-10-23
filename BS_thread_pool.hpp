@@ -1025,7 +1025,7 @@ case x:																																												\
         if (!worker_failure_message.empty())
         {
 #if defined(HAVE_MUPDF)
-            tesseract::tprintf("ERROR: {}\nWARNING: The thread will terminate/abort now!\n", worker_failure_message);
+            tesseract::tprintError("{}\nWARNING: The thread will terminate/abort now!\n", worker_failure_message);
 #else
             fprintf(stderr, "ERROR: %s\nWARNING: The thread will terminate/abort now!\n", worker_failure_message.c_str());
 #endif
