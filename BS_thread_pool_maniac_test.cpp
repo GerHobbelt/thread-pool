@@ -1081,7 +1081,7 @@ void check_performance()
 #define main      bs_threadpool_maniacal_test_main
 #endif
 
-int main()
+int main(void)
 {
     const std::string log_filename = "BS_thread_pool_test-" + get_time() + ".log";
     if (output_log)

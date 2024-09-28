@@ -662,7 +662,7 @@ void do_tests()
 #define main      bs_threadpool_light_test_main
 #endif
 
-int main()
+int main(void)
 {
     println("BS::thread_pool_light: a fast, lightweight, and easy-to-use C++17 thread pool library");
     println("(c) 2022 Barak Shoshany (baraksh@gmail.com) (http://baraksh.com)");
@@ -722,7 +722,7 @@ void println(T&&... items)
 #define main      bs_threadpool_light_test_main
 #endif
 
-int main()
+int main(void)
 {
 	println("BS::thread_pool_light: a fast, lightweight, and easy-to-use C++17 thread pool library");
 	println("(c) 2022 Barak Shoshany (baraksh@gmail.com) (http://baraksh.com)");

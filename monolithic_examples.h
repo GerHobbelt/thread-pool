@@ -7,9 +7,9 @@
 extern "C" {
 #endif
 
-int bs_threadpool_light_test_main();
-int bs_threadpool_test_main();
-int bs_threadpool_maniacal_test_main();
+int bs_threadpool_light_test_main(void);
+int bs_threadpool_test_main(void);
+int bs_threadpool_maniacal_test_main(void);
 
 #ifdef __cplusplus
 }
